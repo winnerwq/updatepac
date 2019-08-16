@@ -40,18 +40,23 @@ function _convert() {
 
 	if [[ -f "${_localgfw}" ]]; then
 		USING_EXISTING_GFWLIST=1
-		base64 --decode --input="${_localgfw}" 1>"${_gfwlist}"
+		base64 --decode --input="${_localgfw}" 1>"${_gfwlist}" 2>/dev/null
 		if [[ $? -ne 0 ]]; then
 			cat "${_localgfw}" >"${_gfwlist}"
 		fi
 	else
 		echo "Downloading ${GFWLIST_URL}..."
+		_gfwlist_cnt="$(curl "${GFWLIST_URL}" --fail --socks5-hostname "${PROXY}")"
+		if [[ $? -ne 0 ]]; then
+			echo "Failed to download from ${GFWLIST_URL}"
+			exit 2
+		fi
 		case ${_method} in
-		[13])
-			curl "${GFWLIST_URL}" --fail --socks5-hostname "${PROXY}" | base64 --decode >"${_gfwlist}"
-			;;
 		2)
-			curl "${GFWLIST_URL}" --socks5-hostname "${PROXY}" >"${_gfwlist}"
+			echo "${_gfwlist_cnt}" >"${_gfwlist}"
+			;;
+		*)
+			echo "${_gfwlist_cnt}" | base64 --decode >"${_gfwlist}"
 			;;
 		esac
 	fi
@@ -93,25 +98,36 @@ function _convert() {
 			||wikipedia.org' | sed -e 's/[[:blank:]]//g' >>"${_gfwlist}"
 		;;
 	4)
-		awk 'NR==FNR && NR>1 && /^[^!]/{
-				gsub(/\\/,"\\\\",$0);
-				if($0 ~ /^[|.]/){
-					gsub(/^[|.]+/,"",$0);
-					ap[$0]=1;
-				} else if ($0 ~ /^[@]/){
-					gsub(/^[@]+/,"",$0);
+		_tmp_sr_rules="$(awk 'NR>1 && /^[^!]/{
+				# a=$0
+				gsub(/(http[s]*:\/\/|\/.*$|:[0-9]+$)/,"",$0);
+				if ($0 ~ /^[ \t]*$/){
+					NEXT
+				}
+				if ($0 ~ /^[@]+/){
+					gsub(/^[@]+[|]*/,"",$0);
 					ad[$0]=0;
-				}
-			}NR>FNR{
-				if ( $0 ~ /{{RULES}}/ ){
-					for(i=0;i<length(a);i++){
-						printf("  \"%s\",\n",a[i])
-					}
 				} else {
-					print $0;
+					gsub(/^[|\.]+/,"",$0);
+					ap[$0]=1;
 				}
-			}' "${_gfwlist}" "${_pac_temp}" less
-		exit 0
+				# printf("%s ---> %s,\n", a, $0);
+			}END{
+				for(i in ap){
+					if ( i ~ /^$/ ){
+						continue;
+					}
+					printf("%s,%s\n",i,ap[i]);
+				}
+				for(i in ad){
+					if ( i ~ /^$/ ){
+						continue;
+					}
+					printf("%s,%s\n",i,ad[i]);
+				}
+			}' "${_gfwlist}")"
+			echo "${_tmp_sr_rules}" |less
+			exit 0
 		;;
 	esac
 
@@ -139,7 +155,7 @@ function _convert() {
 	case ${_method} in
 	[12])
 		echo "Converting gfwlist using command as below:"
-		echo "${_cmd}"
+		echo "${_cmd}" | sed -e 's/[[:blank:]][[:blank:]]*/ /g'
 		eval "${_cmd}"
 		;;
 	3)
@@ -496,7 +512,7 @@ dHBzOi8vd3d3Lmdvb2dsZS5jb20gMzAyCl5odHRwOi8vcmVqZWN0LmV4YW1wbGUuY29tIHJlamVjdCAK
 #main begin
 __method=$1
 if [[ ! ${__method} =~ [123] ]]; then
-	__method=3
+	__method=4
 fi
 # 1 gfwlist2pac
 # 2 genPac
